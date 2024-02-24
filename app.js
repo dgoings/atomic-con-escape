@@ -1,10 +1,71 @@
 const express = require("express");
+const cors = require("cors");
 const app = express();
-const port = process.env.PORT || 3001;
+app.use(cors());
+app.use(express.json());
 
-app.get("/", (req, res) => res.type('html').send(html));
+const PORT = process.env.PORT || 3001;
+// In-memory data storage
+let dataStore = { status: "stopped" };
+// Keep track of connected clients
+const clients = [];
 
-const server = app.listen(port, () => console.log(`Example app listening on port ${port}!`));
+app.get("/", (_, res) => res.type("html").send(html));
+
+// SSE endpoint setup
+app.get("/events", (req, res) => {
+  // Set headers for SSE
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+
+  clients.push(res);
+
+  const sendEvent = () => {
+    const data = JSON.stringify(dataStore);
+    res.write(`data: ${data}\n\n`);
+  };
+
+  // Send initial data
+  sendEvent();
+
+  // Set up heartbeat to keep connection alive
+  const heartbeat = setInterval(() => {
+    res.write(":\n\n"); // Comment to prevent connection timeout
+  }, 5000);
+
+  // Remove clients when they disconnect
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    clients.splice(clients.indexOf(res), 1); // Remove from the list
+  });
+});
+
+// API endpoint to receive new data and update the in-memory store
+app.post("/update-data", (req, res) => {
+  const { newData } = req.body; // Assuming newData comes in request body
+  console.log(newData);
+  dataStore = { ...dataStore, ...newData };
+  // Notify all SSE clients about the update
+  // For production, consider using a pub/sub system
+  sendEventToAllClients(dataStore);
+
+  res.status(200).json({ message: "Data updated" });
+});
+
+const sendEventToAllClients = (data) => {
+  const dataString = JSON.stringify(data);
+  // Send data to all connected clients
+  clients.forEach((client) => {
+    client.write(`data: ${dataString}\n\n`);
+  });
+};
+
+const server = app.listen(PORT, () =>
+  console.log(`Example app listening on port ${PORT}!`),
+);
 
 server.keepAliveTimeout = 120 * 1000;
 server.headersTimeout = 120 * 1000;
@@ -56,6 +117,10 @@ const html = `
     <section>
       Hello from Render!
     </section>
+    <section>
+      <h1>Server-Sent Events</h1>
+      <p>${JSON.stringify(dataStore)}</p>
+    </section>
   </body>
 </html>
-`
+`;
